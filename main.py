@@ -236,7 +236,7 @@ def register(request: Request, user: UserCreate, background_tasks: BackgroundTas
     db.commit()
 
     # ✅ Send verification email
-    verify_link = f"http://localhost:3000/verify-email/{verification_token}"
+    verify_link = f"{FRONTEND_BASE_URL}/verify-email/{verification_token}"
     html_body = get_html_email_body(
         title="Verify your Crackify Email",
         message=f"""
@@ -259,7 +259,7 @@ def verify_email(token: str, db: Session = Depends(get_db)):
     user.verification_token = None
     db.commit()
 
-    return RedirectResponse(url="http://localhost:3000/email-verified", status_code=302)
+    return RedirectResponse(url=f"{FRONTEND_BASE_URL}/email-verified", status_code=302)
 
 
 
