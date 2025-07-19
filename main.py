@@ -1,3 +1,4 @@
+import resend
 import os
 import io
 import asyncio
@@ -52,6 +53,8 @@ RESET_TOKEN_SECRET = os.getenv("RESET_TOKEN_SECRET", "reset-secret")
 RESET_TOKEN_EXPIRE_MINUTES = int(os.getenv("RESET_TOKEN_EXPIRE_MINUTES", 15))
 FRONTEND_BASE_URL = os.getenv("FRONTEND_BASE_URL", "http://localhost:3000")
 
+resend.api_key = os.getenv("RESEND_API_KEY")
+
 app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
@@ -80,25 +83,19 @@ import aiosmtplib
 from email.message import EmailMessage
 from fastapi import BackgroundTasks
 
+from resend import Emails
+
 async def send_email_async(subject: str, recipient: str, content: str, html_content: str = None):
-    message = EmailMessage()
-    message["From"] = os.getenv("SMTP_EMAIL")
-    message["To"] = recipient
-    message["Subject"] = subject
-    message.set_content(content)
-    
-
-    if html_content:
-        message.add_alternative(html_content, subtype="html")
-
-    await aiosmtplib.send(
-        message,
-        hostname=os.getenv("SMTP_SERVER"),
-        port=int(os.getenv("SMTP_PORT")),
-        start_tls=True,
-        username=os.getenv("SMTP_EMAIL"),
-        password=os.getenv("SMTP_PASSWORD")
-    )
+    try:
+        payload = {
+            "from": "Crackify <support@crackify-ai.com>",
+            "to": [recipient],
+            "subject": subject,
+            "html": html_content or f"<pre>{content}</pre>"
+        }
+        Emails.send(payload)
+    except Exception as e:
+        print(f"❌ Failed to send email via Resend: {e}")
 
 
 # ========================== MODELS ==========================
