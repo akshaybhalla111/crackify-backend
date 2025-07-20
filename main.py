@@ -196,30 +196,56 @@ class QuestionRequest(BaseModel):
     session_id: str
 # ========================== HTML Templates ==========================
 
-def get_html_email_body(title, message, footer="Thanks, Crackify Team"):
+def get_html_email_body(title, message_html, footer="Need help? Contact us at support@crackify-ai.com"):
     return f"""
     <html>
-      <body style="font-family:Arial,sans-serif; background-color:#f5f5f5; padding:20px;">
-        <div style="max-width:600px; margin:auto; background:white; padding:30px; border-radius:8px;">
-          <div style="text-align:center;">
+      <body style="font-family:Arial, sans-serif; background-color:#f5f5f5; padding:20px;">
+        <div style="max-width:600px; margin:auto; background:white; padding:30px; border-radius:8px; box-shadow:0 2px 8px rgba(0,0,0,0.05);">
+          <div style="text-align:center; margin-bottom:20px;">
             <img src='https://i.postimg.cc/4yT60QSq/logo.png' alt='Crackify Logo' width='120'/>
           </div>
-          <h2 style="color:#2563eb; text-align:center;">{title}</h2>
-          <p style="font-size:16px; color:#333;">{message}</p>
-          <p style="font-size:14px; color:#888;">{footer}</p>
+          <h2 style="color:#2563eb; text-align:center; margin-bottom:20px;">{title}</h2>
+          <div style="font-size:15px; color:#333; line-height:1.6;">{message_html}</div>
+          <hr style="margin:30px 0; border:none; border-top:1px solid #eee;" />
+          <p style="font-size:13px; color:#888; text-align:center;">{footer}</p>
         </div>
       </body>
     </html>
     """
-
 
 # ========================== AUTH ROUTES ==========================
 
 @app.post("/register")
 @limiter.limit("5/minute")
 def register(request: Request, user: UserCreate, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
-    if db.query(User).filter(User.email == user.email).first():
-        raise HTTPException(status_code=400, detail="Email already registered")
+    existing_user = db.query(User).filter(User.email == user.email).first()
+
+    if existing_user:
+        if existing_user.is_verified:
+            raise HTTPException(status_code=400, detail="Email already registered and verified.")
+        else:
+            # Resend verification token
+            existing_user.verification_token = secrets.token_urlsafe(32)
+            db.commit()
+
+            verify_link = f"{FRONTEND_BASE_URL}/verify-email/{existing_user.verification_token}"
+            html_body = get_html_email_body(
+                title="Verify Your Crackify Account",
+                message_html=f"""
+                    <p>Hi there,</p>
+                    <p>You're almost there! Just verify your email to start using <strong>Crackify AI</strong>.</p>
+                    <p style="text-align:center; margin: 30px 0;">
+                    <a href="{verify_link}" style="background:#2563eb; color:white; padding:12px 24px; border-radius:6px; text-decoration:none;">
+                        Verify My Email
+                    </a>
+                    </p>
+                    <p>If you didn’t request this, you can ignore it.</p>
+                """
+            )
+            background_tasks.add_task(send_email_async, "Verify Your Email", existing_user.email, "Please verify your Crackify account", html_body)
+
+            return {"message": "Verification email resent. Please check your inbox."}
+
     if not is_valid_password(user.password):
         raise HTTPException(
             status_code=400,
@@ -232,19 +258,25 @@ def register(request: Request, user: UserCreate, background_tasks: BackgroundTas
     db.add(new_user)
     db.commit()
 
-    # ✅ Send verification email
     verify_link = f"{FRONTEND_BASE_URL}/verify-email/{verification_token}"
     html_body = get_html_email_body(
-        title="Verify your Crackify Email",
-        message=f"""
-            <p>Thank you for registering with Crackify AI.</p>
-            <p>Please verify your email by clicking the link below:</p>
-            <p><a href="{verify_link}">Verify Email</a></p>
+        title="Verify Your Crackify Account",
+        message_html=f"""
+            <p>Hi there,</p>
+            <p>Thanks for signing up with <strong>Crackify AI</strong> 🎉</p>
+            <p>To complete your registration, please verify your email by clicking the button below:</p>
+            <p style="text-align:center; margin: 30px 0;">
+            <a href="{verify_link}" style="background:#2563eb; color:white; padding:12px 24px; border-radius:6px; text-decoration:none;">
+                Verify My Email
+            </a>
+            </p>
+            <p>If you didn’t request this, you can safely ignore this email.</p>
         """
     )
     background_tasks.add_task(send_email_async, "Verify Your Email", new_user.email, "Please verify your Crackify account", html_body)
 
     return {"message": "Registered successfully. Please check your email to verify your account."}
+
 
 @app.get("/verify-email/{token}")
 def verify_email(token: str, db: Session = Depends(get_db)):
@@ -436,7 +468,17 @@ def send_reset_link(request: Request, background_tasks: BackgroundTasks, db: Ses
 
     html_body = get_html_email_body(
         title="Reset Your Crackify Password",
-        message=f"Click the button below to reset your password. This link is valid for {RESET_TOKEN_EXPIRE_MINUTES} minutes.<br><br><a href='{reset_link}' style='background:#2563eb;color:white;padding:10px 20px;border-radius:5px;text-decoration:none;'>Reset Password</a>"
+        message_html=f"""
+            <p>Hi,</p>
+            <p>We received a request to reset your Crackify AI password.</p>
+            <p>Click the button below to create a new password. This link is valid for <strong>{RESET_TOKEN_EXPIRE_MINUTES} minutes</strong>:</p>
+            <p style="text-align:center; margin: 30px 0;">
+            <a href="{reset_link}" style="background:#2563eb; color:white; padding:12px 24px; border-radius:6px; text-decoration:none;">
+                Reset Password
+            </a>
+            </p>
+            <p>If you didn’t request this, no problem — you can safely ignore this email.</p>
+        """
     )
     background_tasks.add_task(
         send_email_async,
@@ -647,7 +689,7 @@ async def verify_payment(request: Request, background_tasks: BackgroundTasks, us
         # ✅ Create receipt email HTML
         html_body = get_html_email_body(
             title="Your Crackify AI Subscription is Confirmed!",
-            message=f"""
+            message_html=f"""
                 <p>Thank you for subscribing to the <strong>{selected_plan.title()} Plan</strong>.</p>
                 <table style="width:100%; border-collapse: collapse; margin: 20px 0;">
                   <tr>
@@ -734,8 +776,13 @@ def google_login(data: dict, background_tasks: BackgroundTasks, db: Session = De
 
     if is_new_user:
         html_body = get_html_email_body(
-            title="Welcome to Crackify!",
-            message="Thank you for registering with Crackify AI via Google Sign-In. We're excited to help you master your interviews!"
+            title="🎉 Welcome to Crackify AI!",
+            message_html="""
+                <p>Hi there,</p>
+                <p>Thanks for signing in with <strong>Google</strong> on <strong>Crackify AI</strong>.</p>
+                <p>We're excited to have you! You can now start exploring mock and live interviews powered by AI 🚀</p>
+                <p style="margin-top: 30px;">If you have any questions, feel free to reply to this email or contact us at <a href="mailto:support@crackify-ai.com">support@crackify-ai.com</a>.</p>
+            """
         )
         background_tasks.add_task(
             send_email_async,
