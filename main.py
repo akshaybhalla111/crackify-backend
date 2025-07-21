@@ -91,7 +91,8 @@ async def send_email_async(subject: str, recipient: str, content: str, html_cont
             "from": "Crackify <support@crackify-ai.com>",
             "to": [recipient],
             "subject": subject,
-            "html": html_content or f"<pre>{content}</pre>"
+            "html": html_content or f"<pre>{content}</pre>",
+            "text": content
         }
         Emails.send(payload)
     except Exception as e:
@@ -202,12 +203,13 @@ def get_html_email_body(title, message_html, footer="Need help? Contact us at su
       <body style="font-family:Arial, sans-serif; background-color:#f5f5f5; padding:20px;">
         <div style="max-width:600px; margin:auto; background:white; padding:30px; border-radius:8px; box-shadow:0 2px 8px rgba(0,0,0,0.05);">
           <div style="text-align:center; margin-bottom:20px;">
-            <img src='https://i.postimg.cc/4yT60QSq/logo.png' alt='Crackify Logo' width='120'/>
+            <img src='https://app.crackify-ai.com/logo.jpg' alt='Crackify Logo' width='120'/>
           </div>
           <h2 style="color:#2563eb; text-align:center; margin-bottom:20px;">{title}</h2>
           <div style="font-size:15px; color:#333; line-height:1.6;">{message_html}</div>
           <hr style="margin:30px 0; border:none; border-top:1px solid #eee;" />
           <p style="font-size:13px; color:#888; text-align:center;">{footer}</p>
+          <p style="font-size:12px; color:#999; text-align:center;">You received this email because you registered for Crackify AI.</p>
         </div>
       </body>
     </html>
@@ -229,6 +231,18 @@ def register(request: Request, user: UserCreate, background_tasks: BackgroundTas
             db.commit()
 
             verify_link = f"{FRONTEND_BASE_URL}/verify-email/{existing_user.verification_token}"
+            plain_text = f"""
+            Hi there,
+
+            Thanks for signing up with Crackify AI! 🎉
+
+            You're almost there — please verify your email to activate your account:
+            {verify_link}
+
+            If you didn’t request this, you can safely ignore this email.
+
+            Need help? Contact us at support@crackify-ai.com
+            """
             html_body = get_html_email_body(
                 title="Verify Your Crackify Account",
                 message_html=f"""
@@ -242,7 +256,7 @@ def register(request: Request, user: UserCreate, background_tasks: BackgroundTas
                     <p>If you didn’t request this, you can ignore it.</p>
                 """
             )
-            background_tasks.add_task(send_email_async, "Verify Your Email", existing_user.email, "Please verify your Crackify account", html_body)
+            background_tasks.add_task(send_email_async, "Verify Your Email", existing_user.email, plain_text, html_body)
 
             return {"message": "Verification email resent. Please check your inbox."}
 
@@ -259,6 +273,18 @@ def register(request: Request, user: UserCreate, background_tasks: BackgroundTas
     db.commit()
 
     verify_link = f"{FRONTEND_BASE_URL}/verify-email/{verification_token}"
+    plain_text = f"""
+    Hi there,
+
+    Thanks for signing up with Crackify AI! 🎉
+
+    You're almost there — please verify your email to activate your account:
+    {verify_link}
+
+    If you didn’t request this, you can safely ignore this email.
+
+    Need help? Contact us at support@crackify-ai.com
+    """
     html_body = get_html_email_body(
         title="Verify Your Crackify Account",
         message_html=f"""
@@ -273,7 +299,7 @@ def register(request: Request, user: UserCreate, background_tasks: BackgroundTas
             <p>If you didn’t request this, you can safely ignore this email.</p>
         """
     )
-    background_tasks.add_task(send_email_async, "Verify Your Email", new_user.email, "Please verify your Crackify account", html_body)
+    background_tasks.add_task(send_email_async, "Verify Your Email", new_user.email, plain_text, html_body)
 
     return {"message": "Registered successfully. Please check your email to verify your account."}
 
@@ -465,7 +491,18 @@ def send_reset_link(request: Request, background_tasks: BackgroundTasks, db: Ses
     )
 
     reset_link = f"{FRONTEND_BASE_URL}/reset-password?token={reset_token}"
+    plain_text = f"""
+    Hi,
 
+    We received a request to reset your Crackify AI password.
+
+    Click the link below to create a new password. This link is valid for {RESET_TOKEN_EXPIRE_MINUTES} minutes:
+    {reset_link}
+
+    If you didn’t request this, you can safely ignore this email.
+
+    Need help? Contact us at support@crackify-ai.com
+    """
     html_body = get_html_email_body(
         title="Reset Your Crackify Password",
         message_html=f"""
@@ -484,7 +521,7 @@ def send_reset_link(request: Request, background_tasks: BackgroundTasks, db: Ses
         send_email_async,
         "Crackify Password Reset",
         email,
-        f"Reset your password: {reset_link}",
+        plain_text,
         html_body
     )
 
@@ -687,6 +724,20 @@ async def verify_payment(request: Request, background_tasks: BackgroundTasks, us
         db.commit()
 
         # ✅ Create receipt email HTML
+        plain_text = f"""
+        Hi,
+
+        Thank you for subscribing to the {selected_plan.title()} Plan on Crackify AI!
+
+        Order ID: {razorpay_order_id}
+        Payment ID: {razorpay_payment_id}
+        Date: {datetime.utcnow().strftime('%b %d, %Y')}
+        Total Amount Paid: ₹{total_amount:.2f}
+
+        You now have access to all premium features of your plan.
+
+        Need help? Contact us at support@crackify-ai.com
+        """
         html_body = get_html_email_body(
             title="Your Crackify AI Subscription is Confirmed!",
             message_html=f"""
@@ -736,7 +787,7 @@ async def verify_payment(request: Request, background_tasks: BackgroundTasks, us
             send_email_async,
             "Crackify AI Subscription Confirmation",
             user.email,
-            f"Your {selected_plan} plan is now active. Order ID: {razorpay_order_id}.Total ₹{total_amount:.2f}",
+            plain_text,
             html_body
         )
 
@@ -775,6 +826,15 @@ def google_login(data: dict, background_tasks: BackgroundTasks, db: Session = De
         is_new_user = True
 
     if is_new_user:
+        plain_text = """
+        Hi there,
+
+        Thanks for signing in with Google on Crackify AI.
+
+        We're excited to have you! You can now explore mock and live interviews powered by AI 🚀
+
+        Need help? Contact us at support@crackify-ai.com
+        """
         html_body = get_html_email_body(
             title="🎉 Welcome to Crackify AI!",
             message_html="""
@@ -788,7 +848,7 @@ def google_login(data: dict, background_tasks: BackgroundTasks, db: Session = De
             send_email_async,
             "Welcome to Crackify!",
             email,
-            "Thank you for registering!",  # plain text fallback
+            plain_text,  # plain text fallback
             html_body
         )
 
